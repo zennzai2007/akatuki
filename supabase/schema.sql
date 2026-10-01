@@ -81,6 +81,15 @@ $$;
 revoke execute on function public.is_blocked() from public, anon;
 grant execute on function public.is_blocked() to authenticated;
 
+-- 自分の未完了の申込数（申込中＋取引中）。同時に申し込める数の上限に使う。
+create or replace function public.active_application_count() returns integer
+language sql security definer set search_path = '' stable as $$
+  select count(*)::int from public.applications
+  where applicant_id = (select auth.uid()) and status in ('申込中', '取引中');
+$$;
+revoke execute on function public.active_application_count() from public, anon;
+grant execute on function public.active_application_count() to authenticated;
+
 -- 通報された取引かどうか（reports は誰も読めないので関数で判定する）
 create or replace function public.trade_reported(app_id uuid) returns boolean
 language sql security definer set search_path = '' stable as $$
@@ -114,6 +123,8 @@ create policy "apply" on applications for insert to authenticated
   with check ((select auth.uid()) = applicant_id
       and status = '申込中' and completed_at is null
       and not public.is_blocked()
+      -- 同時に申し込めるのは3件まで（docs/app.js の MAX_ACTIVE_APPLICATIONS と揃える）
+      and public.active_application_count() < 3
       and exists (select 1 from listings l
                   where l.id = listing_id and l.status = 'open'
                     and l.owner_id <> (select auth.uid())));
