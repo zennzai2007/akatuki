@@ -30,6 +30,9 @@
   var HEIC_CONVERTER_URL = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
 
   var LISTING_STATUS = { open: "出品中", reserved: "取引中", done: "譲渡済み", cancelled: "取消済み" };
+
+  // 同時に進められる取引の上限（申込中＋取引中）。DB 側のポリシーでも同じ数で止めている。
+  var MAX_ACTIVE_APPLICATIONS = 3;
   var EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
   var UNIVERSITY_EMAIL = /@yamaguchi-u\.ac\.jp$/i;
@@ -294,6 +297,13 @@
   function applicationsBy(status) {
     return store.applications().filter(function (item) {
       return item.status === status && item.applicant_id === cache.me;
+    });
+  }
+
+  // 自分がまだ終えていない申し込み（申込中・取引中）。
+  function activeApplications() {
+    return store.applications().filter(function (item) {
+      return item.applicant_id === cache.me && (item.status === "申込中" || item.status === "取引中");
     });
   }
 
@@ -936,15 +946,17 @@
       var mine = item.owner_id === cache.me;
       var closed = item.status !== "open";
       var stopped = blocked();
+      var tooMany = !applied && activeApplications().length >= MAX_ACTIVE_APPLICATIONS;
 
       var button = $("detail-apply");
       var note = $("detail-note");
-      button.disabled = applied || mine || closed || stopped;
-      note.hidden = !(applied || mine || closed || stopped);
-      if (stopped) note.textContent = "利用が停止されています。運営者にお問い合わせください";
-      else if (mine) note.textContent = "自分の出品です";
+      button.disabled = applied || mine || closed || stopped || tooMany;
+      note.hidden = !(applied || mine || closed || stopped || tooMany);
+      if (mine) note.textContent = "自分の出品です";
       else if (closed) note.textContent = "この商品の受付は終了しました";
       else if (applied) note.textContent = "この商品はすでに申し込み済みです";
+      else if (stopped) note.textContent = "利用が停止されています。運営者にお問い合わせください";
+      else if (tooMany) note.textContent = "同時に申し込めるのは" + MAX_ACTIVE_APPLICATIONS + "件までです";
 
       // 自分の出品は通報できない。
       report.close();
@@ -1005,6 +1017,11 @@
 
       if (blocked()) {
         toast("利用が停止されているため申し込めません");
+        return;
+      }
+
+      if (activeApplications().length >= MAX_ACTIVE_APPLICATIONS) {
+        toast("同時に申し込めるのは" + MAX_ACTIVE_APPLICATIONS + "件までです。取引を進めてからお試しください");
         return;
       }
 
