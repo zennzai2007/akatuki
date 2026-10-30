@@ -139,6 +139,12 @@ button, input, select, textarea {
 
 .center-error { text-align: center; }
 
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
 .actions {
   margin-top: 26px;
   display: flex;

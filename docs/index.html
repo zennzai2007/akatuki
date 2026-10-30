@@ -53,7 +53,8 @@
 
       <div class="field">
         <label for="signup-password">パスワード</label>
-        <input type="password" id="signup-password" autocomplete="new-password">
+        <input type="password" id="signup-password" autocomplete="new-password" aria-describedby="signup-password-hint">
+        <p class="hint" id="signup-password-hint">8文字以上で入力してください</p>
         <p class="error" id="signup-password-error" role="alert"></p>
       </div>
 
