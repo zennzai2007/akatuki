@@ -25,6 +25,9 @@ create table applications (
   applicant_id uuid not null references profiles(id) on delete cascade,
   date text, place text, message text,
   status text not null default '申込中' check (status in ('申込中', '取引中', '取引完了', '取消')),
+  -- 受け渡しは双方が確認してはじめて取引完了になる
+  owner_done boolean not null default false,
+  applicant_done boolean not null default false,
   completed_at timestamptz,
   created_at timestamptz not null default now()
 );
@@ -214,18 +217,25 @@ begin
   update public.listings set status = 'reserved' where id = lid;
 end $$;
 
--- ========== RPC: 受け渡し完了（出品者のみ） ==========
-create or replace function public.complete_application(app_id uuid)
+-- ========== RPC: 受け渡しの確認（双方がそろうと取引完了） ==========
+create or replace function public.confirm_handover(app_id uuid)
 returns void language plpgsql security definer set search_path = '' as $$
-declare lid uuid; oid uuid;
+declare lid uuid; oid uuid; aid uuid; me uuid := (select auth.uid()); o boolean; a boolean;
 begin
-  select ap.listing_id, l.owner_id into lid, oid
+  select ap.listing_id, l.owner_id, ap.applicant_id, ap.owner_done, ap.applicant_done
+    into lid, oid, aid, o, a
   from public.applications ap join public.listings l on l.id = ap.listing_id
   where ap.id = app_id and ap.status = '取引中';
-  if not found or oid <> (select auth.uid()) then raise exception 'not allowed'; end if;
-  update public.applications set status = '取引完了', completed_at = now() where id = app_id;
-  update public.listings set status = 'done' where id = lid;
-  delete from public.messages where application_id = app_id;
+  if not found or (me <> oid and me <> aid) then raise exception 'not allowed'; end if;
+
+  if me = oid then o := true; else a := true; end if;
+  update public.applications set owner_done = o, applicant_done = a where id = app_id;
+
+  if o and a then
+    update public.applications set status = '取引完了', completed_at = now() where id = app_id;
+    update public.listings set status = 'done' where id = lid;
+    delete from public.messages where application_id = app_id;
+  end if;
 end $$;
 
 -- ========== RPC: 取消（当事者のどちらか） ==========
@@ -247,10 +257,10 @@ begin
 end $$;
 
 revoke execute on function public.approve_application(uuid) from public, anon;
-revoke execute on function public.complete_application(uuid) from public, anon;
+revoke execute on function public.confirm_handover(uuid) from public, anon;
 revoke execute on function public.cancel_application(uuid) from public, anon;
 grant execute on function public.approve_application(uuid) to authenticated;
-grant execute on function public.complete_application(uuid) to authenticated;
+grant execute on function public.confirm_handover(uuid) to authenticated;
 grant execute on function public.cancel_application(uuid) to authenticated;
 
 -- ========== Storage: 写真 ==========
