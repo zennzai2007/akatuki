@@ -1434,9 +1434,40 @@
       return;
     }
     try { await refresh(); } catch (error) { /* 次の読み込みで反映される */ }
-    toast(doneText);
+    // 読み直したあとの状態で文面を決めたい場合は関数で渡す。
+    toast(typeof doneText === "function" ? doneText() : doneText);
     rerender();
     renderBadges();
+  }
+
+  // 受け渡しは出品者と受け取る人の両方が確認して完了になる。
+  function handoverLine(entry) {
+    var iDone = entry.applicant_id === cache.me ? entry.applicant_done : entry.owner_done;
+    var otherDone = entry.applicant_id === cache.me ? entry.owner_done : entry.applicant_done;
+    if (iDone) return "受け渡し確認　済み（相手の確認待ち）";
+    if (otherDone) return "受け渡し確認　相手は確認済み";
+    return "受け渡しが済んだら、お互いに確認を押してください";
+  }
+
+  function handoverAction(entry) {
+    return {
+      label: "受け渡し完了",
+      run: function (event) {
+        changeApplication("confirm_handover", entry, event.currentTarget,
+          "受け渡しは済みましたか？両方が確認すると取引完了になり、元に戻せません。",
+          function () {
+            var now = store.applications().filter(function (item) { return item.id === entry.id; })[0];
+            return now && now.status === "取引完了"
+              ? "取引が完了しました"
+              : "確認しました。相手の確認を待っています";
+          },
+          renderTransactions);
+      }
+    };
+  }
+
+  function alreadyConfirmed(entry) {
+    return entry.applicant_id === cache.me ? entry.applicant_done : entry.owner_done;
   }
 
   // 申込者側のカード。写真と商品名は出品から引く。
@@ -1465,16 +1496,19 @@
 
   function renderDeals() {
     renderEntryList("deals-list", "deals-empty", applicationsBy("取引中"), function (entry) {
-      return applicationCard(entry, [
-        "受取日　" + formatDate(entry.date),
-        "受取場所　" + entry.place,
-        "出品者が完了処理をすると履歴に移ります"
-      ], [
+      var actions = [
         {
           label: "メッセージ",
           run: function () { go("#/chat/" + entry.id); }
         }
-      ]);
+      ];
+      if (!alreadyConfirmed(entry)) actions.push(handoverAction(entry));
+
+      return applicationCard(entry, [
+        "受取日　" + formatDate(entry.date),
+        "受取場所　" + entry.place,
+        handoverLine(entry)
+      ], actions);
     });
   }
 
@@ -1582,20 +1616,17 @@
     } else {
       lines.push(
         "受取日　" + formatDate(entry.date),
-        "受取場所　" + entry.place
+        "受取場所　" + entry.place,
+        handoverLine(entry)
       );
       actions = [
         {
           label: "メッセージ",
           run: function () { go("#/chat/" + entry.id); }
-        },
-        {
-          label: "受け渡し完了",
-          run: function (event) {
-            changeApplication("complete_application", entry, event.currentTarget,
-              "受け渡しは済みましたか？完了にすると元に戻せません。", "取引が完了しました", renderTransactions);
-          }
-        },
+        }
+      ];
+      if (!alreadyConfirmed(entry)) actions.push(handoverAction(entry));
+      actions.push(
         {
           label: "取り消す",
           run: function (event) {
@@ -1603,7 +1634,7 @@
               "この取引を取り消しますか？出品は受付中に戻ります。", "取引を取り消しました", renderTransactions);
           }
         }
-      ];
+      );
     }
 
     return makeEntryCard(Object.assign({}, entry, { photo_url: listing.photo_url }), lines, actions);
