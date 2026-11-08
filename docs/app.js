@@ -35,6 +35,25 @@
   var MAX_ACTIVE_APPLICATIONS = 3;
   var EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+  // 禁止物かもしれない出品に気づくための言葉。出品時に確認を出し、DB 側の
+  // トリガー（flag_listing）が同じ言葉で listings.flagged を立てる。
+  // 言葉を足すときは supabase/schema.sql の配列もあわせて直す。
+  var FLAG_WORDS = [
+    "酒", "ビール", "チューハイ", "ウイスキー", "ワイン", "焼酎",
+    "たばこ", "タバコ", "煙草", "ベイプ", "ライター",
+    "薬", "処方", "サプリ", "コンタクト", "体温計",
+    "化粧水", "ファンデーション", "口紅", "下着", "マスク",
+    "食品", "お菓子", "飲料", "飲み物", "手作り",
+    "ヘルメット", "チャイルドシート",
+    "ナイフ", "包丁", "カッター", "刃物",
+    "現金", "金券", "商品券", "ギフトカード", "チケット", "回数券",
+    "アカウント", "過去問", "解答", "海賊", "コピー品", "偽物"
+  ];
+
+  function flaggedWords(text) {
+    return FLAG_WORDS.filter(function (word) { return text.indexOf(word) >= 0; });
+  }
+
   var UNIVERSITY_EMAIL = /@yamaguchi-u\.ac\.jp$/i;
 
   // window.supabase はライブラリ本体。接続先は config.js。
@@ -1225,6 +1244,15 @@
       if (blocked()) {
         toast("利用が停止されているため出品できません");
         return;
+      }
+
+      // 禁止物かもしれない言葉があれば、出す前に一度確認する。
+      var found = flaggedWords([name.value, description.value, course.value].join(" "));
+      if (found.length) {
+        var question = "「" + found.join("」「") + "」が含まれています。\n"
+          + "出してはいけないものに当たらないか、もう一度確認してください。\n"
+          + "このまま出品すると、運営者が内容を確認します。出品しますか？";
+        if (!window.confirm(question)) return;
       }
 
       var button = form.querySelector('[type="submit"]');
