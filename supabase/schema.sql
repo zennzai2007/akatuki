@@ -15,6 +15,8 @@ create table listings (
   owner_id uuid not null references profiles(id) on delete cascade,
   name text not null,
   category text, color text, condition text, period text, pickup text, campus text,
+  -- カテゴリーが「教科書」のときだけ入る授業名
+  course_name text,
   description text not null default '', photo_url text,
   status text not null default 'open' check (status in ('open', 'reserved', 'done', 'cancelled')),
   created_at timestamptz not null default now()
