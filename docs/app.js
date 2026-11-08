@@ -617,6 +617,21 @@
   /* ------------------------------------------------------------------
      ログイン / 新規登録
   ------------------------------------------------------------------ */
+  // ブラウザ（iPhone ならキーチェーン）に「保存しますか？」と聞いてもらう。
+  // 保存先はブラウザで、このサイトにはパスワードを一切持たない。
+  async function rememberLogin(email, password) {
+    if (!window.PasswordCredential || !navigator.credentials) return;
+    try {
+      await navigator.credentials.store(new window.PasswordCredential({
+        id: email,
+        password: password,
+        name: email
+      }));
+    } catch (error) {
+      /* 保存できなくてもログインは続ける */
+    }
+  }
+
   (function auth() {
     var loginForm = $("login-form");
     var email = $("login-email");
@@ -668,6 +683,7 @@
         return;
       }
 
+      await rememberLogin(address, password.value);
       password.value = "";
       showLoginNote("");
       await enter(result.data.session);
@@ -724,6 +740,7 @@
         return;
       }
 
+      await rememberLogin(address, newPassword.value);
       newPassword.value = "";
       confirmPassword.value = "";
 
