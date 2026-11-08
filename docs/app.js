@@ -239,6 +239,19 @@
     return cache.ratings.filter(function (item) { return item.application_id === applicationId; })[0] || null;
   }
 
+  // ログイン前は、受付中の出品だけを読む（DB 側も anon には open しか返さない）。
+  async function loadPublic() {
+    var result;
+    try {
+      result = await sb.from("listings").select("*")
+        .eq("status", "open")
+        .order("created_at", { ascending: false });
+    } catch (error) {
+      result = { error: error };
+    }
+    cache.listings = (!result.error && result.data) ? result.data : [];
+  }
+
   // 読み込みに失敗してもログイン状態は保ち、再読み込みで取り直せるようにする。
   async function enter(session) {
     cache.me = session.user.id;
@@ -256,6 +269,10 @@
     cache.applications = [];
     cache.ratings = [];
     go("#/login");
+    // ログアウト後も出品を見て回れるよう、公開分だけ読み直しておく。
+    loadPublic().then(function () {
+      if (!cache.me) route();
+    });
   }
 
   var store = {
@@ -739,7 +756,7 @@
 
     return { render: render };
   })();
-
+                                                                                                                                                                                                                                                
   /* ------------------------------------------------------------------
      検索（絞り込み＋一覧）
   ------------------------------------------------------------------ */
@@ -906,7 +923,13 @@
     var current = null;
 
     $("detail-apply").addEventListener("click", function () {
-      if (current) go("#/apply/" + current.id);
+      if (!current) return;
+      if (!cache.me) {
+        showLoginNote("申し込むにはログインが必要です");
+        go("#/login");
+        return;
+      }
+      go("#/apply/" + current.id);
     });
 
     var report = attachReport("detail", function () {
@@ -936,8 +959,25 @@
       $("detail-pickup").textContent = item.pickup;
       $("detail-campus").textContent = item.campus;
 
-      $("detail-owner").textContent = personLabel(item.owner_id);
-      showRating("detail-owner-rating", item.owner_id);
+      var guest = !cache.me;
+      $("detail-owner").textContent = guest ? "ログインすると表示されます" : personLabel(item.owner_id);
+      if (guest) $("detail-owner-rating").textContent = "ログインすると表示されます";
+      else showRating("detail-owner-rating", item.owner_id);
+
+      var button = $("detail-apply");
+      var note = $("detail-note");
+
+      if (guest) {
+        // ログイン前は中身を見るだけ。申し込みはログインしてから。
+        button.disabled = false;
+        button.textContent = "ログインして申し込む";
+        note.hidden = false;
+        note.textContent = "申し込むにはログインが必要です";
+        report.close();
+        $("detail-report").hidden = true;
+        return;
+      }
+      button.textContent = "申し込む";
 
       var applied = store.applications().some(function (entry) {
         return entry.listing_id === item.id && entry.applicant_id === cache.me
@@ -948,8 +988,6 @@
       var stopped = blocked();
       var tooMany = !applied && activeApplications().length >= MAX_ACTIVE_APPLICATIONS;
 
-      var button = $("detail-apply");
-      var note = $("detail-note");
       button.disabled = applied || mine || closed || stopped || tooMany;
       note.hidden = !(applied || mine || closed || stopped || tooMany);
       if (mine) note.textContent = "自分の出品です";
@@ -1826,9 +1864,10 @@
   var ROUTES = {
     "#/login": { view: "view-login", tabs: false, auth: false },
     "#/signup": { view: "view-signup", tabs: false, auth: false },
-    "#/home": { view: "view-home", tabs: true, tab: "#/home", render: function () { home.render(); } },
-    "#/search": { view: "view-search", tabs: true, tab: "#/search", render: function () { search.render(); } },
-    "#/results": { view: "view-results", tabs: true, tab: "#/search", render: function () { results.render(); } },
+    // ログイン前でも、出品を見て回るところまでは開ける。
+    "#/home": { view: "view-home", tabs: true, tab: "#/home", auth: "any", render: function () { home.render(); } },
+    "#/search": { view: "view-search", tabs: true, tab: "#/search", auth: "any", render: function () { search.render(); } },
+    "#/results": { view: "view-results", tabs: true, tab: "#/search", auth: "any", render: function () { results.render(); } },
     "#/sell": { view: "view-sell", tabs: true, tab: "#/sell", render: function () { sell.render(); } },
     "#/terms": { view: "view-terms", tabs: true, tab: "#/mypage", auth: "any" },
     "#/transactions": { view: "view-transactions", tabs: true, tab: "#/mypage", render: renderTransactions },
@@ -1837,7 +1876,8 @@
   };
 
   function route() {
-    var hash = window.location.hash || "#/login";
+    // 最初に開く画面はホーム。ログインしていなくても出品を見られる。
+    var hash = window.location.hash || "#/home";
     var match = /^#\/(item|apply|chat)\/(.+)$/.exec(hash);
     var config;
     var param = null;
@@ -1845,7 +1885,7 @@
     if (match) {
       param = match[2];
       if (match[1] === "item") {
-        config = { view: "view-detail", tabs: true, tab: "#/search", render: function () { detail.render(param); } };
+        config = { view: "view-detail", tabs: true, tab: "#/search", auth: "any", render: function () { detail.render(param); } };
       } else if (match[1] === "apply") {
         config = { view: "view-confirm", tabs: true, tab: "#/search", render: function () { confirmView.render(param); } };
       } else {
@@ -1879,9 +1919,13 @@
     });
 
     var tabbar = $("tabbar");
-    tabbar.hidden = !(config.tabs && cache.me);
+    tabbar.hidden = !config.tabs;
     each(tabbar.querySelectorAll(".tab"), function (tab) {
-      if (config.tab && tab.getAttribute("data-go") === config.tab) tab.setAttribute("aria-current", "page");
+      var target = tab.getAttribute("data-go");
+      // ログイン前は、見て回れる画面とログインだけを出す。
+      var forGuest = target === "#/home" || target === "#/search" || target === "#/login";
+      tab.hidden = cache.me ? target === "#/login" : !forGuest;
+      if (config.tab && target === config.tab) tab.setAttribute("aria-current", "page");
       else tab.removeAttribute("aria-current");
     });
 
@@ -1925,7 +1969,12 @@
     if (session) {
       await enter(session);
       if (callback.present) toast("メールアドレスを確認しました");
-    } else if (callback.present) {
+    } else {
+      // ログインしていなくても出品は見られる。
+      await loadPublic();
+    }
+
+    if (!session && callback.present) {
       showLoginNote(callback.error === "otp_expired"
         ? "確認リンクの有効期限が切れています。もう一度登録してください"
         : "確認リンクからログインできませんでした。メールアドレスとパスワードでログインしてください");
