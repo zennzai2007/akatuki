@@ -8,6 +8,8 @@ create table profiles (
   photo_url text,
   -- 問題のある利用者を止める。ダッシュボードで true にすると出品・申込・メッセージができなくなる。
   blocked boolean not null default false,
+  -- 招待リンクから登録した場合、使った招待コード
+  invite_code text,
   created_at timestamptz not null default now()
 );
 create table listings (
@@ -211,14 +213,46 @@ create policy "rate after done" on ratings for insert to authenticated
                   and l.owner_id = rated_id));
 revoke update, delete on ratings from anon, authenticated;
 
--- ========== 登録時: ドメイン制限 + profiles 自動作成 ==========
+-- ========== 招待（新入生など、大学のメールアドレスがまだ無い人向け） ==========
+-- コードは運営がダッシュボードで作る。アプリからは読み書きできない。
+create table invites (
+  code text primary key,
+  note text not null default '',
+  max_uses integer not null default 100,
+  used_count integer not null default 0,
+  expires_at timestamptz,
+  created_at timestamptz not null default now()
+);
+alter table invites enable row level security;
+revoke all on invites from anon, authenticated;
+
+-- ========== 登録時: ドメイン制限（または招待コード）+ profiles 自動作成 ==========
 create or replace function public.on_auth_user_created() returns trigger
 language plpgsql security definer set search_path = '' as $$
+declare given text := nullif(btrim(new.raw_user_meta_data ->> 'invite'), '');
+declare matched text;
 begin
-  if coalesce(new.email, '') !~* '@yamaguchi-u\.ac\.jp$' then
+  if coalesce(new.email, '') ~* '@yamaguchi-u\.ac\.jp$' then
+    insert into public.profiles (id) values (new.id);
+    return new;
+  end if;
+
+  if given is null then
     raise exception 'university email only';
   end if;
-  insert into public.profiles (id) values (new.id);
+
+  update public.invites i
+     set used_count = i.used_count + 1
+   where lower(i.code) = lower(given)
+     and i.used_count < i.max_uses
+     and (i.expires_at is null or i.expires_at > now())
+  returning i.code into matched;
+
+  if matched is null then
+    raise exception 'invalid invite';
+  end if;
+
+  insert into public.profiles (id, invite_code) values (new.id, matched);
   return new;
 end $$;
 create trigger on_auth_user_created after insert on auth.users
