@@ -632,7 +632,7 @@
     }
   }
 
-  (function auth() {
+  var auth = (function () {
     var loginForm = $("login-form");
     var email = $("login-email");
     var password = $("login-password");
@@ -648,9 +648,11 @@
     }
 
     function signupErrorMessage(error) {
-      // ドメイン制限はDBのトリガーで弾くため、Supabase からは汎用のエラーしか返らない。
+      // ドメイン制限と招待コードの確認はDBのトリガーで行うため、Supabase からは汎用のエラーしか返らない。
       if (/database error saving new user/i.test(error.message)) {
-        return "登録できませんでした。山口大学のメールアドレスか確認してください";
+        return invite
+          ? "登録できませんでした。招待リンクの期限が切れているか、上限に達した可能性があります"
+          : "登録できませんでした。山口大学のメールアドレスか確認してください";
       }
       if (error.code === "user_already_exists") return "このメールアドレスは登録済みです";
       if (error.code === "weak_password") return "推測されやすいパスワードです。別のパスワードにしてください";
@@ -695,6 +697,7 @@
     var newEmail = $("signup-email");
     var newPassword = $("signup-password");
     var confirmPassword = $("signup-confirm");
+    var invite = "";   // 招待リンクのコード。DB 側のトリガーが有効かどうかを確かめる。
 
     signupForm.addEventListener("submit", async function (event) {
       event.preventDefault();
@@ -703,7 +706,7 @@
         ? setError(newEmail, $("signup-email-error"), "メールアドレスを入力してください")
         : !EMAIL_PATTERN.test(address)
           ? setError(newEmail, $("signup-email-error"), "メールアドレスの形式が正しくありません")
-          : !UNIVERSITY_EMAIL.test(address)
+          : (!invite && !UNIVERSITY_EMAIL.test(address))
             ? setError(newEmail, $("signup-email-error"), "山口大学のメールアドレスで登録してください")
             : setError(newEmail, $("signup-email-error"), "");
       var okPassword = newPassword.value.length >= 8
@@ -719,8 +722,12 @@
       var result = await sb.auth.signUp({
         email: address,
         password: newPassword.value,
-        // 開いているサイト（公開版かローカル）へ戻す。Supabase の Redirect URLs に無い場合は Site URL へ戻る。
-        options: { emailRedirectTo: window.location.origin + window.location.pathname }
+        options: {
+          // 開いているサイト（公開版かローカル）へ戻す。Supabase の Redirect URLs に無い場合は Site URL へ戻る。
+          emailRedirectTo: window.location.origin + window.location.pathname,
+          // 招待コードは DB 側のトリガーが確かめる。
+          data: invite ? { invite: invite } : {}
+        }
       }).catch(function (error) { return { error: error }; });
       button.disabled = false;
 
@@ -755,6 +762,17 @@
       showLoginNote("確認メールを送りました。メール内のリンクを開いてください");
       go("#/login");
     });
+
+    // 招待リンク（#/signup/コード）から来たときだけ、大学アドレス以外でも登録できる。
+    function setInvite(code) {
+      invite = code || "";
+      $("signup-invite-note").hidden = !invite;
+      $("signup-sub").textContent = invite
+        ? "ふだん使っているメールアドレスで登録できます"
+        : "山口大学のメールアドレスで登録してください";
+    }
+
+    return { setInvite: setInvite };
   })();
 
   /* ------------------------------------------------------------------
@@ -1936,7 +1954,7 @@
   ------------------------------------------------------------------ */
   var ROUTES = {
     "#/login": { view: "view-login", tabs: false, auth: false },
-    "#/signup": { view: "view-signup", tabs: false, auth: false },
+    "#/signup": { view: "view-signup", tabs: false, auth: false, render: function () { auth.setInvite(""); } },
     // ログイン前でも、出品を見て回るところまでは開ける。
     "#/home": { view: "view-home", tabs: true, tab: "#/home", auth: "any", render: function () { home.render(); } },
     "#/search": { view: "view-search", tabs: true, tab: "#/search", auth: "any", render: function () { search.render(); } },
@@ -1951,13 +1969,16 @@
   function route() {
     // 最初に開く画面はホーム。ログインしていなくても出品を見られる。
     var hash = window.location.hash || "#/home";
-    var match = /^#\/(item|apply|chat)\/(.+)$/.exec(hash);
+    var match = /^#\/(item|apply|chat|signup)\/(.+)$/.exec(hash);
     var config;
     var param = null;
 
     if (match) {
       param = match[2];
-      if (match[1] === "item") {
+      if (match[1] === "signup") {
+        // 招待リンク。新入生など、大学のメールアドレスがまだ無い人向け。
+        config = { view: "view-signup", tabs: false, auth: false, render: function () { auth.setInvite(param); } };
+      } else if (match[1] === "item") {
         config = { view: "view-detail", tabs: true, tab: "#/search", auth: "any", render: function () { detail.render(param); } };
       } else if (match[1] === "apply") {
         config = { view: "view-confirm", tabs: true, tab: "#/search", render: function () { confirmView.render(param); } };
