@@ -127,6 +127,7 @@
 
     <div class="specs">
       <div class="spec"><span>カテゴリー</span><span class="value" id="detail-category"></span></div>
+      <div class="spec" id="detail-course-row" hidden><span>授業名</span><span class="value" id="detail-course"></span></div>
       <div class="spec"><span>商品の状態</span><span class="value" id="detail-condition"></span></div>
       <div class="spec"><span>受け渡し可能期間</span><span class="value" id="detail-period"></span></div>
       <div class="spec"><span>受け渡し場所</span><span class="value" id="detail-pickup"></span></div>
@@ -225,6 +226,13 @@
         <button type="button" class="picker"><span>カテゴリー</span><span class="chosen">＋</span></button>
         <div class="picker-panel" hidden></div>
         <p class="error" role="alert"></p>
+      </div>
+
+      <!-- 教科書を選んだときだけ出す -->
+      <div class="sell-field" id="sell-course-field" hidden>
+        <label for="sell-course">授業名</label>
+        <input type="text" id="sell-course" class="plain-input" maxlength="40" autocomplete="off">
+        <p class="error" id="sell-course-error" role="alert"></p>
       </div>
 
       <div class="sell-field" data-key="condition">

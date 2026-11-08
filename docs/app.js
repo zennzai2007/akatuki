@@ -465,7 +465,7 @@
 
     function matches(item, keyword) {
       if (keyword) {
-        var haystack = [item.name, item.category, item.color, item.description].join(" ");
+        var haystack = [item.name, item.category, item.course_name, item.description].join(" ");
         if (haystack.indexOf(keyword) < 0) return false;
       }
       return FILTERS.every(function (filter) {
@@ -535,7 +535,7 @@
   /* ------------------------------------------------------------------
      「＋」で開いて1つだけ選ぶ入力（出品フォーム・欲しいです投稿フォーム）
   ------------------------------------------------------------------ */
-  function pickerGroup(form) {
+  function pickerGroup(form, onPick) {
     var values = {};
     var fields = {};
 
@@ -557,6 +557,7 @@
           button.querySelector(".chosen").textContent = value;
           panel.hidden = true;
           setError(null, field.querySelector(".error"), "");
+          if (onPick) onPick(key, value);
         });
         label.appendChild(radio);
         label.appendChild(document.createTextNode(value));
@@ -954,6 +955,8 @@
       setPhoto($("detail-photo"), item.photo_url);
       $("detail-description").textContent = item.description || "（説明はありません）";
       $("detail-category").textContent = item.category;
+      $("detail-course").textContent = item.course_name || "";
+      $("detail-course-row").hidden = !item.course_name;
       $("detail-condition").textContent = item.condition;
       $("detail-period").textContent = item.period;
       $("detail-pickup").textContent = item.pickup;
@@ -1136,10 +1139,26 @@
     var photoInput = $("sell-photo-input");
     var photoRemove = $("sell-photo-remove");
     var photoLabel = $("sell-photo-label");
-    var pickers = pickerGroup(form);
+    var course = $("sell-course");
+    // 教科書のときだけ授業名を聞く。
+    var pickers = pickerGroup(form, function (key) {
+      if (key === "category") showCourseField();
+    });
     var chosen = pickers.values;
     var photo = null;    // 縮小済みの JPEG（Blob）。出品するときに Storage へ上げる。
     var preview = "";
+
+    function isTextbook() {
+      return chosen.category === "教科書";
+    }
+
+    function showCourseField() {
+      $("sell-course-field").hidden = !isTextbook();
+      if (!isTextbook()) {
+        course.value = "";
+        setError(course, $("sell-course-error"), "");
+      }
+    }
 
     function showPhoto(blob) {
       if (preview) URL.revokeObjectURL(preview);
@@ -1182,6 +1201,13 @@
         setError(description, $("sell-description-error"), "");
       }
 
+      if (isTextbook() && !course.value.trim()) {
+        setError(course, $("sell-course-error"), "授業名を入力してください");
+        ok = false;
+      } else {
+        setError(course, $("sell-course-error"), "");
+      }
+
       if (!photo) {
         setError(null, $("sell-photo-error"), "写真を追加してください");
         ok = false;
@@ -1209,6 +1235,7 @@
           owner_id: cache.me,
           name: name.value.trim(),
           category: chosen.category,
+          course_name: isTextbook() ? course.value.trim() : null,
           condition: chosen.condition,
           period: chosen.period,
           pickup: chosen.pickup,
@@ -1241,6 +1268,7 @@
       form.reset();
       showPhoto(null);
       pickers.reset();
+      showCourseField();
       each(form.querySelectorAll(".error"), function (box) { box.textContent = ""; });
       $("sell-photo-error").textContent = "";
     }
