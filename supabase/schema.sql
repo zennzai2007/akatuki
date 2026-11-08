@@ -114,6 +114,8 @@ create policy "update own profile" on profiles for update to authenticated
   using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
 
 create policy "read listings" on listings for select to authenticated using (true);
+-- ログイン前（anon）には受付中の出品だけ見せる。出品者の名前や評価は読めない。
+create policy "read open listings" on listings for select to anon using (status = 'open');
 create policy "own listings" on listings for all to authenticated
   using ((select auth.uid()) = owner_id)
   with check ((select auth.uid()) = owner_id and not public.is_blocked());
