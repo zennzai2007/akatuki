@@ -19,6 +19,8 @@ create table listings (
   course_name text,
   description text not null default '', photo_url text,
   status text not null default 'open' check (status in ('open', 'reserved', 'done', 'cancelled')),
+  -- 禁止物らしい言葉を含む出品の印。トリガー flag_listing が立てる。
+  flagged boolean not null default false,
   created_at timestamptz not null default now()
 );
 create table applications (
@@ -77,6 +79,33 @@ create index on ratings (rated_id);
 create unique index one_active_application
   on applications (listing_id, applicant_id)
   where status in ('申込中', '取引中');
+
+-- ========== 禁止物らしい言葉に印を付ける（docs/app.js の FLAG_WORDS と同じ言葉） ==========
+create or replace function public.flag_listing() returns trigger
+language plpgsql set search_path = '' as $$
+declare word text;
+begin
+  new.flagged := false;
+  foreach word in array array[
+    '酒','ビール','チューハイ','ウイスキー','ワイン','焼酎',
+    'たばこ','タバコ','煙草','ベイプ','ライター',
+    '薬','処方','サプリ','コンタクト','体温計',
+    '化粧水','ファンデーション','口紅','下着','マスク',
+    '食品','お菓子','飲料','飲み物','手作り',
+    'ヘルメット','チャイルドシート',
+    'ナイフ','包丁','カッター','刃物',
+    '現金','金券','商品券','ギフトカード','チケット','回数券',
+    'アカウント','過去問','解答','海賊','コピー品','偽物']
+  loop
+    if position(word in coalesce(new.name, '') || ' ' || coalesce(new.description, '') || ' ' || coalesce(new.course_name, '')) > 0 then
+      new.flagged := true;
+      return new;
+    end if;
+  end loop;
+  return new;
+end $$;
+create trigger flag_listing before insert or update on listings
+  for each row execute function public.flag_listing();
 
 -- ========== 利用停止の判定 ==========
 create or replace function public.is_blocked() returns boolean
